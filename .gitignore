@@ -46,6 +46,9 @@ staticfiles/
 .env
 .env.local
 .env.*.local
+*.json
+!package.json
+!tsconfig.json
 firmware/include/secrets.h
 
 # --- PlatformIO & Embedded Firmware ---
