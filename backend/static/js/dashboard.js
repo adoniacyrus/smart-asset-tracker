@@ -258,7 +258,11 @@ const DashboardController = (() => {
             }
 
             if (data.geofence) {
-                if (gfDetail) gfDetail.textContent = `Radius: ${data.geofence.radius_meters}m`;
+                if (gfDetail) {
+                    const cLat = Number(data.geofence.center_latitude).toFixed(6);
+                    const cLon = Number(data.geofence.center_longitude).toFixed(6);
+                    gfDetail.innerHTML = `<span class="text-info"><i class="bi bi-crosshair me-1"></i>${cLat}, ${cLon}</span> &bull; Radius: ${data.geofence.radius_meters}m`;
+                }
                 GeofenceUI.populateForm(data.geofence);
                 TrackerMap.updateGeofence(
                     data.geofence.center_latitude,

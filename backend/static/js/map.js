@@ -35,16 +35,18 @@ const TrackerMap = (() => {
 
     const createCenterIcon = () => {
         const html = `
-            <div class="custom-asset-marker">
-                <div class="marker-pin center"></div>
+            <div class="custom-center-marker-wrapper" title="Geofence Center (Drag to reposition)">
+                <div class="center-crosshair">
+                    <div class="crosshair-dot"></div>
+                </div>
             </div>
         `;
         return L.divIcon({
             html,
             className: 'custom-center-marker',
-            iconSize: [24, 24],
-            iconAnchor: [12, 12],
-            popupAnchor: [0, -12]
+            iconSize: [28, 28],
+            iconAnchor: [14, 14],
+            popupAnchor: [0, -14]
         });
     };
 
@@ -174,18 +176,58 @@ const TrackerMap = (() => {
 
         const centerLatLng = [centerLat, centerLon];
 
-        // 1. Center Marker
+        // 1. Center Marker (Draggable, high-priority z-index, interactive)
         const centerIcon = createCenterIcon();
+        const popupContent = `
+            <div style="font-size: 0.78rem; line-height: 1.45;">
+                <strong class="text-primary"><i class="bi bi-crosshair me-1"></i> Geofence Center</strong><br>
+                <strong>Lat:</strong> ${Number(centerLat).toFixed(6)}<br>
+                <strong>Lon:</strong> ${Number(centerLon).toFixed(6)}<br>
+                <strong>Radius:</strong> ${radiusMeters}m<br>
+                <small class="text-secondary"><i class="bi bi-hand-index me-1"></i>Drag to reposition center</small>
+            </div>
+        `;
+
         if (!geofenceCenterMarker) {
-            geofenceCenterMarker = L.marker(centerLatLng, { icon: centerIcon }).addTo(map);
-            geofenceCenterMarker.bindPopup(`
-                <div style="font-size: 0.75rem;">
-                    <strong>Geofence Center</strong><br>
-                    Radius: ${radiusMeters}m
-                </div>
-            `);
+            geofenceCenterMarker = L.marker(centerLatLng, {
+                icon: centerIcon,
+                draggable: true,
+                zIndexOffset: 1500,
+                title: 'Geofence Center (Drag to reposition)'
+            }).addTo(map);
+
+            geofenceCenterMarker.bindPopup(popupContent);
+
+            // Live circle & form update during dragging
+            geofenceCenterMarker.on('drag', (e) => {
+                const pos = e.target.getLatLng();
+                if (geofenceCircle) geofenceCircle.setLatLng(pos);
+                const inputLat = document.getElementById('inputGeofenceLat');
+                const inputLon = document.getElementById('inputGeofenceLon');
+                if (inputLat) inputLat.value = pos.lat.toFixed(6);
+                if (inputLon) inputLon.value = pos.lng.toFixed(6);
+            });
+
+            // On drag end, update popup and notify
+            geofenceCenterMarker.on('dragend', (e) => {
+                const pos = e.target.getLatLng();
+                const inputLat = document.getElementById('inputGeofenceLat');
+                const inputLon = document.getElementById('inputGeofenceLon');
+                if (inputLat) inputLat.value = pos.lat.toFixed(6);
+                if (inputLon) inputLon.value = pos.lng.toFixed(6);
+                geofenceCenterMarker.setPopupContent(`
+                    <div style="font-size: 0.78rem; line-height: 1.45;">
+                        <strong class="text-primary"><i class="bi bi-crosshair me-1"></i> Geofence Center (Repositioned)</strong><br>
+                        <strong>Lat:</strong> ${pos.lat.toFixed(6)}<br>
+                        <strong>Lon:</strong> ${pos.lng.toFixed(6)}<br>
+                        <strong>Radius:</strong> ${radiusMeters}m<br>
+                        <span class="text-warning small fw-bold">Click 'Update Geofence via API' to save!</span>
+                    </div>
+                `).openPopup();
+            });
         } else {
             geofenceCenterMarker.setLatLng(centerLatLng);
+            geofenceCenterMarker.setPopupContent(popupContent);
         }
 
         // 2. Circle Boundary

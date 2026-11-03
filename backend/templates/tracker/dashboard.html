@@ -325,9 +325,14 @@
                                         <input class="form-check-input" type="checkbox" role="switch" id="switchGeofenceActive" checked>
                                         <label class="form-check-label text-secondary small" for="switchGeofenceActive">Enable Boundary</label>
                                     </div>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary py-1 px-2" id="btnSetCenterFromCurrent" style="font-size: 0.75rem;">
-                                        <i class="bi bi-geo-alt"></i> Set from Asset
-                                    </button>
+                                    <div class="d-flex gap-1">
+                                        <button type="button" class="btn btn-sm btn-outline-info py-1 px-2" id="btnPickCenterOnMap" style="font-size: 0.72rem;" title="Click anywhere on the map to set geofence center">
+                                            <i class="bi bi-cursor-fill me-1"></i> Pick on Map
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary py-1 px-2" id="btnSetCenterFromCurrent" style="font-size: 0.72rem;" title="Set geofence center to asset's current location">
+                                            <i class="bi bi-geo-alt"></i> Set from Asset
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <button type="submit" class="btn btn-primary btn-sm w-100 fw-semibold" id="btnSaveGeofence">

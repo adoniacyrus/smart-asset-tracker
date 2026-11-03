@@ -311,8 +311,66 @@ body.theme-dark .map-legend-overlay {
 }
 
 .marker-pin.center {
-    background-color: #2563eb;
+    background-color: #0284c7;
     border: 2px solid #ffffff;
+}
+
+/* Distinct Geofence Center Crosshair Marker */
+.custom-center-marker-wrapper {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+}
+
+.custom-center-marker-wrapper:active {
+    cursor: grabbing;
+}
+
+.center-crosshair {
+    position: relative;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2.5px solid #0284c7;
+    background-color: rgba(2, 132, 199, 0.4);
+    box-shadow: 0 0 10px rgba(2, 132, 199, 0.8), 0 2px 6px rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.center-crosshair::before,
+.center-crosshair::after {
+    content: '';
+    position: absolute;
+    background-color: #0284c7;
+}
+
+.center-crosshair::before {
+    width: 2px;
+    height: 32px;
+    top: -4px;
+    left: 8.5px;
+}
+
+.center-crosshair::after {
+    height: 2px;
+    width: 32px;
+    left: -4px;
+    top: 8.5px;
+}
+
+.crosshair-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #ffffff;
+    border: 2px solid #0284c7;
+    border-radius: 50%;
+    z-index: 5;
 }
 
 /* Pulsing radar circle for active asset */

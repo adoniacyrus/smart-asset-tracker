@@ -8,12 +8,29 @@ const GeofenceUI = (() => {
     let currentGeofence = null;
 
     const init = () => {
+        const inputLat = document.getElementById('inputGeofenceLat');
+        const inputLon = document.getElementById('inputGeofenceLon');
         const radiusSlider = document.getElementById('inputGeofenceRadius');
         const radiusDisplay = document.getElementById('displayRadiusValue');
         const form = document.getElementById('geofenceForm');
         const btnSetFromAsset = document.getElementById('btnSetCenterFromCurrent');
+        const btnPickOnMap = document.getElementById('btnPickCenterOnMap');
+        let isPickMode = false;
 
-        // Dynamic slider value readout
+        // Live coordinate input preview on map
+        const liveUpdateCenter = () => {
+            const lat = parseFloat(inputLat.value);
+            const lon = parseFloat(inputLon.value);
+            const rad = radiusSlider ? parseFloat(radiusSlider.value) : 500.0;
+            const isActive = document.getElementById('switchGeofenceActive').checked;
+            if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+                TrackerMap.updateGeofence(lat, lon, rad, isActive);
+            }
+        };
+        if (inputLat) inputLat.addEventListener('input', liveUpdateCenter);
+        if (inputLon) inputLon.addEventListener('input', liveUpdateCenter);
+
+        // Dynamic slider value readout & live circle resize
         if (radiusSlider && radiusDisplay) {
             radiusSlider.addEventListener('input', (e) => {
                 radiusDisplay.textContent = `${e.target.value} m`;
@@ -38,6 +55,39 @@ const GeofenceUI = (() => {
                     TrackerMap.updateGeofence(status.last_known_latitude, status.last_known_longitude, radius, true);
                 } else {
                     alert('No valid asset location available to use as geofence center.');
+                }
+            });
+        }
+
+        // Interactive "Pick on Map" to place geofence center anywhere
+        if (btnPickOnMap) {
+            btnPickOnMap.addEventListener('click', () => {
+                isPickMode = !isPickMode;
+                if (isPickMode) {
+                    btnPickOnMap.classList.replace('btn-outline-info', 'btn-info');
+                    btnPickOnMap.classList.add('text-dark');
+                    btnPickOnMap.innerHTML = '<i class="bi bi-crosshair me-1"></i> Click on map';
+                } else {
+                    btnPickOnMap.classList.replace('btn-info', 'btn-outline-info');
+                    btnPickOnMap.classList.remove('text-dark');
+                    btnPickOnMap.innerHTML = '<i class="bi bi-cursor-fill me-1"></i> Pick on Map';
+                }
+            });
+
+            TrackerMap.onMapClick((e) => {
+                if (isPickMode) {
+                    const lat = e.latlng.lat;
+                    const lon = e.latlng.lng;
+                    if (inputLat) inputLat.value = lat.toFixed(6);
+                    if (inputLon) inputLon.value = lon.toFixed(6);
+                    const radius = parseFloat(radiusSlider.value);
+                    const isActive = document.getElementById('switchGeofenceActive').checked;
+                    TrackerMap.updateGeofence(lat, lon, radius, isActive);
+
+                    isPickMode = false;
+                    btnPickOnMap.classList.replace('btn-info', 'btn-outline-info');
+                    btnPickOnMap.classList.remove('text-dark');
+                    btnPickOnMap.innerHTML = '<i class="bi bi-cursor-fill me-1"></i> Pick on Map';
                 }
             });
         }
@@ -104,11 +154,20 @@ const GeofenceUI = (() => {
         const switchActive = document.getElementById('switchGeofenceActive');
         const badgeActive = document.getElementById('geofenceActiveBadge');
 
-        if (inputLat) inputLat.value = Number(geofence.center_latitude).toFixed(6);
-        if (inputLon) inputLon.value = Number(geofence.center_longitude).toFixed(6);
-        if (inputRadius) inputRadius.value = geofence.radius_meters;
-        if (radiusDisplay) radiusDisplay.textContent = `${geofence.radius_meters} m`;
-        if (switchActive) switchActive.checked = geofence.is_active;
+        // Protect fields from being overwritten if the user is currently typing or editing
+        const isEditing = (
+            document.activeElement === inputLat ||
+            document.activeElement === inputLon ||
+            document.activeElement === inputRadius
+        );
+
+        if (!isEditing) {
+            if (inputLat) inputLat.value = Number(geofence.center_latitude).toFixed(6);
+            if (inputLon) inputLon.value = Number(geofence.center_longitude).toFixed(6);
+            if (inputRadius) inputRadius.value = geofence.radius_meters;
+            if (radiusDisplay) radiusDisplay.textContent = `${geofence.radius_meters} m`;
+            if (switchActive) switchActive.checked = geofence.is_active;
+        }
 
         if (badgeActive) {
             badgeActive.textContent = geofence.is_active ? 'Active' : 'Disabled';
