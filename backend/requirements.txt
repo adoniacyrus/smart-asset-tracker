@@ -1,0 +1,20 @@
+# Core Framework & REST API
+Django>=5.1.0,<5.2.0
+djangorestframework>=3.15.0,<3.16.0
+django-cors-headers>=4.4.0,<5.0.0
+
+# Database Connectors for MySQL 8 & PostgreSQL (Render Cloud)
+mysqlclient>=2.2.4,<2.3.0
+PyMySQL>=1.1.0,<1.2.0
+psycopg2-binary>=2.9.9,<3.0.0
+dj-database-url>=2.2.0,<3.0.0
+cryptography>=43.0.0
+
+# Environment Configuration
+python-dotenv>=1.0.1,<2.0.0
+
+# Production Server & Static Files
+gunicorn>=23.0.0,<24.0.0
+whitenoise>=6.8.0,<7.0.0
+
+

@@ -1,0 +1,70 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: smart_tracker_db
+    restart: unless-stopped
+    command: --default-authentication-plugin=caching_sha2_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-smart_tracker_db}
+      MYSQL_USER: ${DB_USER:-tracker_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-tracker_secure_pass_2026}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_secure_pass_2026}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - tracker-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  web:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smart_tracker_web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_NAME=${DB_NAME:-smart_tracker_db}
+      - DB_USER=${DB_USER:-tracker_user}
+      - DB_PASSWORD=${DB_PASSWORD:-tracker_secure_pass_2026}
+      - DEBUG=${DEBUG:-False}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1,0.0.0.0,192.168.0.103}
+      - DEFAULT_ASSET_ID=${DEFAULT_ASSET_ID:-ASSET-ESP32-01}
+      - DEFAULT_GEOFENCE_RADIUS_METERS=${DEFAULT_GEOFENCE_RADIUS_METERS:-500}
+      - DEVICE_SECRET_TOKEN=${DEVICE_SECRET_TOKEN:-esp32_device_secret_token_change_in_production}
+      - DASHBOARD_API_KEY=${DASHBOARD_API_KEY:-dashboard_admin_key_change_in_production}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-}
+      - CORS_ALLOW_ALL_ORIGINS=${CORS_ALLOW_ALL_ORIGINS:-True}
+    networks:
+      - tracker-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mysql_data:
+    name: smart_tracker_mysql_data
+
+networks:
+  tracker-network:
+    name: smart_tracker_network
+    driver: bridge
