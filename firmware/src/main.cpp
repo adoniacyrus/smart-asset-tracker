@@ -1,6 +1,6 @@
 /**
  * Smart Asset Location Tracker with Dynamic Geofencing and SOS Alert
- * Phase 3 - ESP32 Firmware Implementation
+ * Phase 3 - ESP32 Firmware Implementation with Secure Cloud HTTPS
  * Target: ESP32 DevKit (38-pin, NodeMCU-32S / ESP32-WROOM-32)
  *
  * Hardware Pin Mapping (Authoritative - DO NOT MODIFY):
@@ -16,13 +16,17 @@
 #include <HardwareSerial.h>
 #include <TinyGPSPlus.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <math.h>
+#include <time.h>
+#include "esp_sntp.h"
 #include "esp_wifi.h"
 #include "driver/gpio.h"
 #include "secrets.h"
+#include "ca_cert.h"
 
 // =============================================================================
 // Authoritative Hardware Pin Definitions
@@ -37,13 +41,14 @@
 // =============================================================================
 // Timing Configurations (Milliseconds)
 // =============================================================================
-const unsigned long CONFIG_POLL_INTERVAL   = 2500;  // Poll backend config every 2.5s
+const unsigned long CONFIG_POLL_INTERVAL   = 4000;  // Poll backend config every 4s
 const unsigned long TELEMETRY_INTERVAL     = 5000;  // Regular telemetry cadence (5s)
-const unsigned long DIAGNOSTICS_INTERVAL   = 3000;  // Serial diagnostics report cadence (3s)
+const unsigned long DIAGNOSTICS_INTERVAL   = 5000;  // Serial diagnostics report cadence (5s)
 const unsigned long BUTTON_DEBOUNCE_DELAY  = 50;    // 50ms debouncing
 const unsigned long WIFI_RETRY_INTERVAL    = 10000; // Wi-Fi reconnect retry interval (10s)
 const unsigned long SOS_FLUSH_INTERVAL     = 3000;  // Retry unacknowledged SOS every 3s
 const uint32_t      GPS_BAUD               = 9600;  // NEO-6M default baud rate
+const uint32_t      HTTPS_TIMEOUT_MS       = 15000; // 15s timeout for cloud HTTPS calls
 
 // =============================================================================
 // Hardware Peripherals & Storage Instances
@@ -88,13 +93,14 @@ int lastButtonReading          = HIGH;
 int debouncedButtonState       = HIGH;
 unsigned long lastDebounceTime = 0;
 
-// Non-blocking Timers
+// Non-blocking Timers & Network Status
 unsigned long lastConfigPollTime = 0;
 unsigned long lastTelemetryTime  = 0;
 unsigned long lastDiagnosticsTime = 0;
 unsigned long lastWifiRetryTime  = 0;
 unsigned long lastSosFlushTime   = 0;
 bool wifiManuallyDisabled        = false;
+bool timeSynchronized            = false;
 
 // GPS UART Byte Tracking
 unsigned long rawGpsBytes = 0;
@@ -113,6 +119,7 @@ void triggerSOS(const char* sourceDescription);
 void clearSOS();
 void persistStateToNVS();
 void restoreStateFromNVS();
+bool syncTime();
 void pollDeviceConfig();
 bool sendTelemetry(int targetIdToAck, long configVersionToAck);
 bool uploadPendingSOSEvent();
@@ -236,6 +243,37 @@ void restoreStateFromNVS() {
 }
 
 // =============================================================================
+// SNTP Time Synchronization (Required for TLS Certificate Date Validation)
+// =============================================================================
+bool syncTime() {
+    if (WiFi.status() != WL_CONNECTED) return false;
+
+    Serial.println("[NTP] Initializing SNTP network time synchronization...");
+    configTime(0, 0, "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+
+    time_t now = time(nullptr);
+    int retries = 0;
+    while (now < 1700000000 && retries < 25) { // Ensure clock is in modern epoch
+        delay(200);
+        now = time(nullptr);
+        retries++;
+    }
+
+    if (now >= 1700000000) {
+        struct tm timeinfo;
+        gmtime_r(&now, &timeinfo);
+        Serial.printf("[NTP] Time synchronized: %04d-%02d-%02d %02d:%02d:%02d UTC\n",
+                      timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                      timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+        timeSynchronized = true;
+        return true;
+    } else {
+        Serial.println("[NTP] Warning: SNTP time sync still pending. TLS certificate validation will retry.");
+        return false;
+    }
+}
+
+// =============================================================================
 // SOS Event Handling
 // =============================================================================
 void triggerSOS(const char* sourceDescription) {
@@ -261,7 +299,7 @@ void triggerSOS(const char* sourceDescription) {
     Serial.println();
 
     // Trigger immediate upload attempt if connected
-    if (WiFi.status() == WL_CONNECTED) {
+    if (WiFi.status() == WL_CONNECTED && timeSynchronized) {
         uploadPendingSOSEvent();
     }
 }
@@ -286,22 +324,32 @@ void clearSOS() {
 }
 
 // =============================================================================
-// HTTP API Operations
+// Secure HTTPS API Operations (WiFiClientSecure with CA Validation)
 // =============================================================================
 
 /**
- * Poll Django Configuration Endpoint
+ * Poll Django Configuration Endpoint over Secure HTTPS
  * GET /api/tracker/device/config/?device_id=ASSET-ESP32-01
  */
 void pollDeviceConfig() {
-    if (WiFi.status() != WL_CONNECTED) return;
+    if (WiFi.status() != WL_CONNECTED || !timeSynchronized) return;
+
+    WiFiClientSecure secureClient;
+    secureClient.setCACert(RENDER_CA_CERT);
+    secureClient.setHandshakeTimeout(15);
+    secureClient.setTimeout(15);
 
     HTTPClient http;
-    http.setTimeout(4000);
+    http.setTimeout(HTTPS_TIMEOUT_MS);
 
     String url = String(DJANGO_SERVER_URL) + "/api/tracker/device/config/?device_id=" + String(DEVICE_ID);
-    http.begin(url);
+    if (!http.begin(secureClient, url)) {
+        Serial.println("[HTTPS Config] Failed to initialize secure connection to host.");
+        return;
+    }
+
     http.addHeader("X-Device-Token", DEVICE_TOKEN);
+    http.addHeader("User-Agent", "ESP32-SmartTracker/2.0");
 
     int httpCode = http.GET();
     if (httpCode == HTTP_CODE_OK) {
@@ -310,7 +358,7 @@ void pollDeviceConfig() {
         DeserializationError error = deserializeJson(doc, payload);
 
         if (error) {
-            Serial.printf("[HTTP Config] JSON deserialization failed: %s\n", error.c_str());
+            Serial.printf("[HTTPS Config] JSON deserialization failed: %s\n", error.c_str());
             http.end();
             return;
         }
@@ -320,7 +368,7 @@ void pollDeviceConfig() {
 
         // 1. Process Remote SOS Clear Command
         if (clearSosCommand) {
-            Serial.println("[HTTP Config] Remote clear_sos_command received from Django!");
+            Serial.println("[HTTPS Config] Remote clear_sos_command received from Django!");
             if (sosActive) {
                 clearSOS();
             }
@@ -344,13 +392,12 @@ void pollDeviceConfig() {
                 geofenceRadiusMeters = newRadius;
                 geofenceActive = true;
                 geofenceUpdated = true;
-                Serial.printf("[HTTP Config] Geofence updated: Center(%.6f, %.6f), Radius: %.1fm\n",
+                Serial.printf("[HTTPS Config] Geofence updated: Center(%.6f, %.6f), Radius: %.1fm\n",
                               geofenceCenterLat, geofenceCenterLon, geofenceRadiusMeters);
             }
         }
 
         // 3. Process Software Coordinate Targets
-        // Requirement: Retain existing object coordinates when only geofence configuration changes!
         bool coordinatesUpdated = false;
         int incomingTargetId = 0;
         JsonObject tgt = doc["target_location"];
@@ -365,7 +412,7 @@ void pollDeviceConfig() {
             coordinatesUpdated = true;
             pendingTargetIdToAck = incomingTargetId;
 
-            Serial.printf("[HTTP Config] Staged target #%d received: Lat: %.6f, Lon: %.6f\n",
+            Serial.printf("[HTTPS Config] Staged target #%d received: Lat: %.6f, Lon: %.6f\n",
                           incomingTargetId, currentLat, currentLon);
             persistStateToNVS();
         }
@@ -384,7 +431,6 @@ void pollDeviceConfig() {
             pendingTargetIdToAck = 0;
             persistStateToNVS();
         } else if (remoteConfigVersion > lastProcessedConfigVersion) {
-            // Version increment without boundary or coordinate change
             recalculateGeofence();
             sendTelemetry(0, remoteConfigVersion);
             lastProcessedConfigVersion = remoteConfigVersion;
@@ -392,26 +438,43 @@ void pollDeviceConfig() {
         }
 
     } else {
-        Serial.printf("[HTTP Config] Poll failed, HTTP code: %d\n", httpCode);
+        if (httpCode < 0) {
+            char err_buf[128];
+            int err = secureClient.lastError(err_buf, sizeof(err_buf));
+            Serial.printf("[HTTPS Config] TLS/Network error: %s (code %d)\n", http.errorToString(httpCode).c_str(), httpCode);
+            if (err < 0) Serial.printf("               TLS detail: %s (err %d)\n", err_buf, err);
+        } else {
+            Serial.printf("[HTTPS Config] Poll failed, HTTP code: %d\n", httpCode);
+        }
     }
 
     http.end();
 }
 
 /**
- * Transmit Telemetry & Acknowledge Processing
+ * Transmit Telemetry & Acknowledge Processing over Secure HTTPS
  * POST /api/tracker/device/telemetry/
  */
 bool sendTelemetry(int targetIdToAck, long configVersionToAck) {
-    if (WiFi.status() != WL_CONNECTED) return false;
+    if (WiFi.status() != WL_CONNECTED || !timeSynchronized) return false;
+
+    WiFiClientSecure secureClient;
+    secureClient.setCACert(RENDER_CA_CERT);
+    secureClient.setHandshakeTimeout(15);
+    secureClient.setTimeout(15);
 
     HTTPClient http;
-    http.setTimeout(4000);
+    http.setTimeout(HTTPS_TIMEOUT_MS);
 
     String url = String(DJANGO_SERVER_URL) + "/api/tracker/device/telemetry/";
-    http.begin(url);
+    if (!http.begin(secureClient, url)) {
+        Serial.println("[HTTPS Telemetry] Failed to initialize secure connection.");
+        return false;
+    }
+
     http.addHeader("Content-Type", "application/json");
     http.addHeader("X-Device-Token", DEVICE_TOKEN);
+    http.addHeader("User-Agent", "ESP32-SmartTracker/2.0");
 
     DynamicJsonDocument doc(512);
     doc["device_id"]              = DEVICE_ID;
@@ -441,15 +504,21 @@ bool sendTelemetry(int targetIdToAck, long configVersionToAck) {
 
     if (success) {
         lastTelemetryTime = millis();
-        Serial.printf("[HTTP Telemetry] Telemetry accepted (HTTP %d). Distance: %.1fm, Inside: %d\n",
+        Serial.printf("[HTTPS Telemetry] Telemetry accepted (HTTP %d). Distance: %.1fm, Inside: %d\n",
                       httpCode, currentDistanceMeters, isInsideGeofence);
         if (targetIdToAck > 0) {
-            Serial.printf("[HTTP Telemetry] Target #%d successfully acknowledged and consumed.\n", targetIdToAck);
+            Serial.printf("[HTTPS Telemetry] Target #%d successfully acknowledged and consumed.\n", targetIdToAck);
         }
     } else {
-        String resp = http.getString();
-        Serial.printf("[HTTP Telemetry] Transmission failed (HTTP %d). Response: %s\n",
-                      httpCode, resp.c_str());
+        if (httpCode < 0) {
+            char err_buf[128];
+            int err = secureClient.lastError(err_buf, sizeof(err_buf));
+            Serial.printf("[HTTPS Telemetry] TLS/Network error: %s (code %d)\n", http.errorToString(httpCode).c_str(), httpCode);
+            if (err < 0) Serial.printf("                 TLS detail: %s (err %d)\n", err_buf, err);
+        } else {
+            String resp = http.getString();
+            Serial.printf("[HTTPS Telemetry] Transmission failed (HTTP %d). Response: %s\n", httpCode, resp.c_str());
+        }
     }
 
     http.end();
@@ -457,19 +526,29 @@ bool sendTelemetry(int targetIdToAck, long configVersionToAck) {
 }
 
 /**
- * Upload Pending Emergency SOS Event
+ * Upload Pending Emergency SOS Event over Secure HTTPS
  * POST /api/tracker/sos/
  */
 bool uploadPendingSOSEvent() {
-    if (WiFi.status() != WL_CONNECTED) return false;
+    if (WiFi.status() != WL_CONNECTED || !timeSynchronized) return false;
+
+    WiFiClientSecure secureClient;
+    secureClient.setCACert(RENDER_CA_CERT);
+    secureClient.setHandshakeTimeout(15);
+    secureClient.setTimeout(15);
 
     HTTPClient http;
-    http.setTimeout(4000);
+    http.setTimeout(HTTPS_TIMEOUT_MS);
 
     String url = String(DJANGO_SERVER_URL) + "/api/tracker/sos/";
-    http.begin(url);
+    if (!http.begin(secureClient, url)) {
+        Serial.println("[HTTPS SOS] Failed to initialize secure connection.");
+        return false;
+    }
+
     http.addHeader("Content-Type", "application/json");
     http.addHeader("X-Device-Token", DEVICE_TOKEN);
+    http.addHeader("User-Agent", "ESP32-SmartTracker/2.0");
 
     DynamicJsonDocument doc(512);
     doc["device_id"]       = DEVICE_ID;
@@ -488,9 +567,16 @@ bool uploadPendingSOSEvent() {
     if (success) {
         pendingSosUpload = false;
         persistStateToNVS();
-        Serial.printf("[HTTP SOS] Emergency SOS successfully registered in Django backend (HTTP %d).\n", httpCode);
+        Serial.printf("[HTTPS SOS] Emergency SOS successfully registered in Django backend (HTTP %d).\n", httpCode);
     } else {
-        Serial.printf("[HTTP SOS] SOS transmission failed (HTTP %d). Will retry.\n", httpCode);
+        if (httpCode < 0) {
+            char err_buf[128];
+            int err = secureClient.lastError(err_buf, sizeof(err_buf));
+            Serial.printf("[HTTPS SOS] TLS/Network error: %s (code %d)\n", http.errorToString(httpCode).c_str(), httpCode);
+            if (err < 0) Serial.printf("           TLS detail: %s (err %d)\n", err_buf, err);
+        } else {
+            Serial.printf("[HTTPS SOS] SOS transmission failed (HTTP %d). Will retry.\n", httpCode);
+        }
     }
 
     http.end();
@@ -498,19 +584,29 @@ bool uploadPendingSOSEvent() {
 }
 
 /**
- * Acknowledge Remote SOS Clear Command
+ * Acknowledge Remote SOS Clear Command over Secure HTTPS
  * POST /api/tracker/device/clear-sos-ack/
  */
 bool acknowledgeClearSOS() {
-    if (WiFi.status() != WL_CONNECTED) return false;
+    if (WiFi.status() != WL_CONNECTED || !timeSynchronized) return false;
+
+    WiFiClientSecure secureClient;
+    secureClient.setCACert(RENDER_CA_CERT);
+    secureClient.setHandshakeTimeout(15);
+    secureClient.setTimeout(15);
 
     HTTPClient http;
-    http.setTimeout(4000);
+    http.setTimeout(HTTPS_TIMEOUT_MS);
 
     String url = String(DJANGO_SERVER_URL) + "/api/tracker/device/clear-sos-ack/";
-    http.begin(url);
+    if (!http.begin(secureClient, url)) {
+        Serial.println("[HTTPS SOS-Ack] Failed to initialize secure connection.");
+        return false;
+    }
+
     http.addHeader("Content-Type", "application/json");
     http.addHeader("X-Device-Token", DEVICE_TOKEN);
+    http.addHeader("User-Agent", "ESP32-SmartTracker/2.0");
 
     DynamicJsonDocument doc(256);
     doc["device_id"]     = DEVICE_ID;
@@ -523,9 +619,9 @@ bool acknowledgeClearSOS() {
     bool success = (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_ACCEPTED);
 
     if (success) {
-        Serial.println("[HTTP SOS-Ack] Remote clear SOS command acknowledged to Django backend.");
+        Serial.println("[HTTPS SOS-Ack] Remote clear SOS command acknowledged to Django backend.");
     } else {
-        Serial.printf("[HTTP SOS-Ack] Acknowledgement failed (HTTP %d).\n", httpCode);
+        Serial.printf("[HTTPS SOS-Ack] Acknowledgement failed (HTTP %d).\n", httpCode);
     }
 
     http.end();
@@ -546,10 +642,12 @@ void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
         case ARDUINO_EVENT_WIFI_STA_GOT_IP: {
             String ip = WiFi.localIP().toString();
             Serial.printf("[Wi-Fi Event] IP address acquired: %s\n", ip.c_str());
+            syncTime();
             break;
         }
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
             Serial.printf("[Wi-Fi Event] Disconnected from AP. Reason code: %d\n", info.wifi_sta_disconnected.reason);
+            timeSynchronized = false;
             break;
         default:
             break;
@@ -558,10 +656,15 @@ void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
 
 void maintainWiFi() {
     if (wifiManuallyDisabled) return;
-    if (WiFi.status() == WL_CONNECTED) return;
+    if (WiFi.status() == WL_CONNECTED) {
+        if (!timeSynchronized) {
+            syncTime();
+        }
+        return;
+    }
 
     unsigned long currentMillis = millis();
-    if (currentMillis - lastWifiRetryTime >= 15000) {
+    if (currentMillis - lastWifiRetryTime >= WIFI_RETRY_INTERVAL) {
         lastWifiRetryTime = currentMillis;
         Serial.printf("[Wi-Fi] Reconnecting to '%s' (status=%d)...\n", WIFI_SSID, (int)WiFi.status());
         WiFi.disconnect();
@@ -635,6 +738,8 @@ void reportDiagnostics() {
     Serial.println("-----------------------------------------------------------------");
     Serial.printf("[DIAG] Uptime: %lu s | Free Heap: %lu B | Wi-Fi: %s (status=%d)\n",
                   uptimeSec, (unsigned long)ESP.getFreeHeap(), ipStr.c_str(), WiFi.status());
+    Serial.printf("       Time Synced  : %s | Backend: %s\n",
+                  timeSynchronized ? "YES (SNTP)" : "NO (PENDING)", DJANGO_SERVER_URL);
     Serial.printf("       Coordinates  : Lat: %.6f, Lon: %.6f (Source: SOFTWARE_SIMULATION)\n",
                   currentLat, currentLon);
     Serial.printf("       Geofence     : Center(%.6f, %.6f), Radius: %.1fm\n",
@@ -662,8 +767,8 @@ void setup() {
 
     Serial.println();
     Serial.println("=================================================================");
-    Serial.println(" SMART ASSET TRACKER - FIRMWARE PHASE 3 (INTEGRATED)            ");
-    Serial.println(" Device ID: ASSET-ESP32-01 | Architecture: HIL Software Target  ");
+    Serial.println(" SMART ASSET TRACKER - FIRMWARE PHASE B (SECURE CLOUD HTTPS)   ");
+    Serial.println(" Target: ESP32 DevKit | Backend: Render Cloud (SSL/TLS Verified) ");
     Serial.println("=================================================================");
 
     // 2. Configure Hardware Output Pins
