@@ -2,8 +2,8 @@ services:
   - type: web
     name: smart-asset-tracker
     runtime: python
-    buildCommand: "./build.sh"
-    startCommand: "gunicorn --chdir backend config.wsgi:application --bind 0.0.0.0:$PORT --workers 3 --timeout 120"
+    buildCommand: "bash build.sh"
+    startCommand: "bash start.sh"
     plan: free
     region: oregon
     envVars:
@@ -17,17 +17,9 @@ services:
         value: "True"
       - key: DEFAULT_ASSET_ID
         value: "ASSET-ESP32-01"
+      - key: DEFAULT_GEOFENCE_RADIUS_METERS
+        value: "500"
       - key: DEVICE_SECRET_TOKEN
         value: "esp32_token_mca_default"
       - key: DASHBOARD_API_KEY
         value: "dashboard_admin_key_mca_2026"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: smart-tracker-postgres
-          property: connectionString
-
-databases:
-  - name: smart-tracker-postgres
-    plan: free
-    databaseName: smart_tracker_db
-    user: tracker_user
