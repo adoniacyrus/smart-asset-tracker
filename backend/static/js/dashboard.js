@@ -159,25 +159,28 @@ const DashboardController = (() => {
                 lastPolled.innerHTML = `<i class="bi bi-arrow-repeat me-1" id="pollingSpinIcon"></i> Synced: ${new Date().toLocaleTimeString()} <span class="text-secondary" style="font-size: 0.68rem;">(${elapsedMs}ms)</span>`;
             }
 
-            // 2. Hardware ESP32 Online/Offline Status (Strictly Evaluated)
+            // 2. Hardware ESP32 Online/Offline Status (Authoritative backend heartbeat check)
             const connBadge = document.getElementById('deviceConnectionBadge');
             const antennaWarning = document.getElementById('antennaWarningNote');
-            const isRealGps = data.last_known_source === 'REAL_GPS';
+            const isDeviceOnline = Boolean(data.hardware_connection && data.hardware_connection.is_online);
             const now = Date.now();
             const lastPacketTime = data.last_known_timestamp ? new Date(data.last_known_timestamp).getTime() : null;
             const packetAgeSec = lastPacketTime ? Math.round((now - lastPacketTime) / 1000) : null;
 
-            if (isRealGps && packetAgeSec !== null && packetAgeSec <= 45) {
-                // Device transmitted REAL_GPS telemetry within the last 45 seconds
+            if (isDeviceOnline) {
+                // Device is actively connected and sending heartbeats / telemetry to backend
                 if (connBadge) {
                     connBadge.textContent = 'Hardware Online';
                     connBadge.className = 'badge bg-success';
                 }
                 if (antennaWarning) {
-                    antennaWarning.innerHTML = '<i class="bi bi-broadcast text-success me-1"></i> ESP32 UART2 telemetry active';
+                    const sourceText = data.last_known_source === 'REAL_GPS'
+                        ? 'NEO-6M GPS stream active'
+                        : `Telemetry stream active (${data.last_known_source || 'Online'})`;
+                    antennaWarning.innerHTML = `<i class="bi bi-broadcast text-success me-1"></i> ${sourceText}`;
                 }
-            } else if (isRealGps && packetAgeSec !== null) {
-                // Device transmitted REAL_GPS in the past, but is currently silent
+            } else if (packetAgeSec !== null && packetAgeSec <= 60) {
+                // Device sent telemetry recently but missed heartbeat threshold
                 if (connBadge) {
                     connBadge.textContent = 'Hardware Inactive';
                     connBadge.className = 'badge bg-warning text-dark';
@@ -186,7 +189,7 @@ const DashboardController = (() => {
                     antennaWarning.innerHTML = `<i class="bi bi-clock-history text-warning me-1"></i> Last seen ${packetAgeSec}s ago`;
                 }
             } else {
-                // No physical ESP32 connected, or telemetry is simulation
+                // No physical ESP32 connected or heartbeats expired
                 if (connBadge) {
                     connBadge.textContent = 'Hardware Idle / Offline';
                     connBadge.className = 'badge bg-secondary';
@@ -206,6 +209,8 @@ const DashboardController = (() => {
             if (metricModeDetail) {
                 if (data.last_known_source === 'REAL_GPS') {
                     metricModeDetail.textContent = 'ESP32 Hardware UART Stream';
+                } else if (data.last_known_source === 'SOFTWARE_SIMULATION') {
+                    metricModeDetail.textContent = 'ESP32 Firmware Simulation Stream';
                 } else if (data.last_known_source === 'DYNAMIC_SIMULATION') {
                     metricModeDetail.textContent = 'Software Route Simulation';
                 } else if (data.last_known_source === 'STATIC_SIMULATION') {
@@ -321,7 +326,7 @@ const DashboardController = (() => {
                         gpsSats.textContent = '0 Satellites tracked (Antenna Idle)';
                     }
                 }
-            } else if (data.last_known_source === 'DYNAMIC_SIMULATION' || data.last_known_source === 'STATIC_SIMULATION') {
+            } else if (data.last_known_source === 'SOFTWARE_SIMULATION' || data.last_known_source === 'DYNAMIC_SIMULATION' || data.last_known_source === 'STATIC_SIMULATION') {
                 if (gpsStatus) {
                     gpsStatus.textContent = 'Simulation Active';
                     gpsStatus.className = 'card-title fw-bold text-warning mb-1';
