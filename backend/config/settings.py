@@ -22,6 +22,20 @@ DEBUG = os.getenv('DEBUG', 'True').lower() in ('true', '1', 'yes')
 # Allowed Hosts
 allowed_hosts_str = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1')
 ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(',') if host.strip()]
+render_host = os.getenv('RENDER_EXTERNAL_HOSTNAME')
+if render_host and render_host not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(render_host)
+if '.onrender.com' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append('.onrender.com')
+
+# CSRF Trusted Origins
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.onrender.com',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+]
+if render_host:
+    CSRF_TRUSTED_ORIGINS.append(f'https://{render_host}')
 
 # API & Device Access Control Tokens
 DASHBOARD_API_KEY = os.getenv('DASHBOARD_API_KEY', 'dashboard_admin_key_mca_2026')
