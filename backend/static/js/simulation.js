@@ -82,8 +82,8 @@ const SimulationController = (() => {
 
         const status = DashboardController.getCurrentStatus();
         const gf = status ? status.geofence : null;
-        const centerLat = gf ? gf.center_latitude : 12.9716;
-        const centerLon = gf ? gf.center_longitude : 77.5946;
+        const centerLat = gf ? gf.center_latitude : 9.5287;
+        const centerLon = gf ? gf.center_longitude : 76.8226;
         const radius = gf ? gf.radius_meters : 500.0;
 
         // Generate or retain route
@@ -354,8 +354,8 @@ const SimulationController = (() => {
             btnPresetIn.addEventListener('click', () => {
                 const status = DashboardController.getCurrentStatus();
                 const gf = status ? status.geofence : null;
-                const cLat = gf ? gf.center_latitude : 12.9716;
-                const cLon = gf ? gf.center_longitude : 77.5946;
+                const cLat = gf ? gf.center_latitude : 9.5287;
+                const cLon = gf ? gf.center_longitude : 76.8226;
                 // Offset inside (~50m)
                 setStaticCoordinates(Number(cLat + 0.0003).toFixed(6), Number(cLon + 0.0003).toFixed(6));
             });
@@ -366,8 +366,8 @@ const SimulationController = (() => {
             btnPresetOut.addEventListener('click', () => {
                 const status = DashboardController.getCurrentStatus();
                 const gf = status ? status.geofence : null;
-                const cLat = gf ? gf.center_latitude : 12.9716;
-                const cLon = gf ? gf.center_longitude : 77.5946;
+                const cLat = gf ? gf.center_latitude : 9.5287;
+                const cLon = gf ? gf.center_longitude : 76.8226;
                 // Offset outside (~1200m)
                 setStaticCoordinates(Number(cLat + 0.0100).toFixed(6), Number(cLon + 0.0100).toFixed(6));
             });

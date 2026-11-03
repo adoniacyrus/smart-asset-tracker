@@ -60,15 +60,15 @@ Preferences preferences;
 // =============================================================================
 // Active State Variables
 // =============================================================================
-// Location & Target Coordinates (Dashboard-provided software coordinates)
-double currentLat = 12.971598;
-double currentLon = 77.594566;
+// Location & Target Coordinates (Amal Jyothi College of Engineering default)
+double currentLat = 9.528700;
+double currentLon = 76.822600;
 bool hasValidCoordinates = true;
 int pendingTargetIdToAck = 0;       // target_id awaiting telemetry confirmation
 
-// Geofence Parameters
-double geofenceCenterLat = 12.971598;
-double geofenceCenterLon = 77.594566;
+// Geofence Parameters (Amal Jyothi Campus, Koovappally, Kerala)
+double geofenceCenterLat = 9.528700;
+double geofenceCenterLon = 76.822600;
 double geofenceRadiusMeters = 500.0;
 bool geofenceActive = true;
 long lastProcessedConfigVersion = -1;

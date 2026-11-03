@@ -48,7 +48,7 @@ const TrackerMap = (() => {
         });
     };
 
-    const init = (lat = 12.9716, lon = 77.5946, zoom = 15) => {
+    const init = (lat = 9.5287, lon = 76.8226, zoom = 16) => {
         if (map) return map;
 
         // Initialize Leaflet Map

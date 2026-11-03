@@ -13,13 +13,14 @@ const DashboardController = (() => {
     let pollIntervalId = null;
     let isPolling = false;
     let adminModal = null;
+    let hasAutoCentered = false;
 
     const init = async () => {
         // 1. Initialize Dual Theme
         initTheme();
 
-        // 2. Initialize Leaflet Map with OpenStreetMap Standard Tiles
-        TrackerMap.init(12.9716, 77.5946, 15);
+        // 2. Initialize Leaflet Map with Amal Jyothi College of Engineering coordinates
+        TrackerMap.init(9.5287, 76.8226, 16);
 
         // 3. Initialize Sub-controllers
         GeofenceUI.init();
@@ -288,7 +289,15 @@ const DashboardController = (() => {
                     data.last_known_longitude,
                     data.last_known_source || 'REAL_GPS'
                 );
-            } else {
+            }
+
+            // Auto-center map on geofence bounds on initial telemetry/geofence load
+            if (!hasAutoCentered && data.geofence) {
+                hasAutoCentered = true;
+                TrackerMap.fitGeofence();
+            }
+
+            if (data.last_known_latitude === null || data.last_known_longitude === null) {
                 // When no valid coordinates exist, display NO GPS FIX
                 if (coordDisplay) {
                     coordDisplay.textContent = 'NO GPS FIX';
